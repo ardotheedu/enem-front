@@ -1,103 +1,279 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Question, QuizState, QuizResult } from '@/types/quiz';
+import { enemAPI } from '@/services/enemAPI';
+import DisciplineSelection from '@/components/DisciplineSelection';
+import QuizQuestion from '@/components/QuizQuestion';
+import QuizResults from '@/components/QuizResults';
+import QuizProgress from '@/components/QuizProgress';
+import ConfirmFinish from '@/components/ConfirmFinish';
+import Loading from '@/components/Loading';
+
+type QuizPhase = 'selection' | 'loading' | 'quiz' | 'results';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [phase, setPhase] = useState<QuizPhase>('selection');
+  const [selectedDiscipline, setSelectedDiscipline] = useState<string | null>(null);
+  const [showConfirmFinish, setShowConfirmFinish] = useState(false);
+  const [quizState, setQuizState] = useState<QuizState>({
+    questions: [],
+    currentQuestionIndex: 0,
+    userAnswers: {},
+    isCompleted: false,
+    score: 0,
+    totalQuestions: 0,
+    selectedDiscipline: null,
+    startTime: new Date(),
+    endTime: null
+  });
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleDisciplineSelect = (discipline: string | null) => {
+    setSelectedDiscipline(discipline);
+  };
+
+  const handleStartQuiz = async () => {
+    try {
+      setPhase('loading');
+      setError(null);
+      
+      let questions: Question[] = [];
+      
+      if (selectedDiscipline) {
+        // Buscar questões de uma disciplina específica
+        questions = await enemAPI.getQuestionsByDiscipline(selectedDiscipline, 45);
+      } else {
+        // Buscar questões de todas as disciplinas
+        questions = await enemAPI.getRandomQuestions(180);
+      }
+
+      if (questions.length === 0) {
+        throw new Error('Nenhuma questão encontrada. Verifique se a API está funcionando.');
+      }
+
+      // Embaralhar as questões
+      const shuffledQuestions = questions.sort(() => Math.random() - 0.5);
+
+      setQuizState({
+        questions: shuffledQuestions,
+        currentQuestionIndex: 0,
+        userAnswers: {},
+        isCompleted: false,
+        score: 0,
+        totalQuestions: shuffledQuestions.length,
+        selectedDiscipline,
+        startTime: new Date(),
+        endTime: null
+      });
+
+      setPhase('quiz');
+    } catch (err) {
+      console.error('Erro ao iniciar quiz:', err);
+      setError('Erro ao carregar questões. Verifique se a API está funcionando.');
+      setPhase('selection');
+    }
+  };
+
+  const handleAnswerSelect = (questionId: number, answer: string) => {
+    setQuizState(prev => ({
+      ...prev,
+      userAnswers: {
+        ...prev.userAnswers,
+        [questionId]: answer
+      }
+    }));
+  };
+
+  const handleQuestionSelect = (index: number) => {
+    setQuizState(prev => ({
+      ...prev,
+      currentQuestionIndex: index
+    }));
+  };
+
+  const handleNext = () => {
+    if (quizState.currentQuestionIndex < quizState.questions.length - 1) {
+      setQuizState(prev => ({
+        ...prev,
+        currentQuestionIndex: prev.currentQuestionIndex + 1
+      }));
+    } else {
+      // Mostrar modal de confirmação antes de finalizar
+      setShowConfirmFinish(true);
+    }
+  };
+
+  const handleConfirmFinish = () => {
+    setShowConfirmFinish(false);
+    finishQuiz();
+  };
+
+  const handleCancelFinish = () => {
+    setShowConfirmFinish(false);
+  };
+
+  const handlePrevious = () => {
+    if (quizState.currentQuestionIndex > 0) {
+      setQuizState(prev => ({
+        ...prev,
+        currentQuestionIndex: prev.currentQuestionIndex - 1
+      }));
+    }
+  };
+
+  const finishQuiz = () => {
+    const endTime = new Date();
+    const timeSpent = endTime.getTime() - quizState.startTime.getTime();
+    
+    // Calcular resultados
+    let correctAnswers = 0;
+    const questionResults = quizState.questions.map(question => {
+      const userAnswer = quizState.userAnswers[question.id];
+      const isCorrect = userAnswer === question.correctAlternative;
+      
+      if (isCorrect) {
+        correctAnswers++;
+      }
+      
+      return {
+        question,
+        userAnswer: userAnswer || 'Não respondida',
+        isCorrect
+      };
+    });
+
+    const wrongAnswers = quizState.questions.length - correctAnswers;
+    const score = (correctAnswers / quizState.questions.length) * 100;
+
+    const result: QuizResult = {
+      totalQuestions: quizState.questions.length,
+      correctAnswers,
+      wrongAnswers,
+      score,
+      timeSpent,
+      discipline: selectedDiscipline || 'all',
+      questions: questionResults
+    };
+
+    setQuizResult(result);
+    setPhase('results');
+  };
+
+  const handleRestart = () => {
+    setQuizState({
+      questions: [],
+      currentQuestionIndex: 0,
+      userAnswers: {},
+      isCompleted: false,
+      score: 0,
+      totalQuestions: 0,
+      selectedDiscipline: null,
+      startTime: new Date(),
+      endTime: null
+    });
+    setQuizResult(null);
+    handleStartQuiz();
+  };
+
+  const handleBackToMenu = () => {
+    setPhase('selection');
+    setSelectedDiscipline(null);
+    setShowConfirmFinish(false);
+    setQuizState({
+      questions: [],
+      currentQuestionIndex: 0,
+      userAnswers: {},
+      isCompleted: false,
+      score: 0,
+      totalQuestions: 0,
+      selectedDiscipline: null,
+      startTime: new Date(),
+      endTime: null
+    });
+    setQuizResult(null);
+    setError(null);
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-100 py-8">
+        <div className="max-w-4xl mx-auto p-6">
+          <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+            <div className="text-red-600 mb-4">
+              <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Erro</h2>
+            <p className="text-gray-600 mb-4">{error}</p>
+            <button
+              onClick={handleBackToMenu}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Voltar ao Menu
+            </button>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 py-8">
+      {phase === 'selection' && (
+        <DisciplineSelection
+          onDisciplineSelect={handleDisciplineSelect}
+          onStartQuiz={handleStartQuiz}
+        />
+      )}
+
+      {phase === 'loading' && (
+        <Loading message="Carregando questões..." />
+      )}
+
+      {phase === 'quiz' && quizState.questions.length > 0 && (
+        <div>
+          <QuizProgress
+            questions={quizState.questions}
+            currentQuestionIndex={quizState.currentQuestionIndex}
+            userAnswers={quizState.userAnswers}
+            onQuestionSelect={handleQuestionSelect}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
+          <QuizQuestion
+            question={quizState.questions[quizState.currentQuestionIndex]}
+            onAnswerSelect={handleAnswerSelect}
+            selectedAnswer={quizState.userAnswers[quizState.questions[quizState.currentQuestionIndex].id]}
+            isAnswered={!!quizState.userAnswers[quizState.questions[quizState.currentQuestionIndex].id]}
+            onNext={handleNext}
+            onPrevious={handlePrevious}
+            currentIndex={quizState.currentQuestionIndex}
+            totalQuestions={quizState.questions.length}
+            canGoNext={true}
+            canGoPrevious={quizState.currentQuestionIndex > 0}
+            startTime={quizState.startTime}
           />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        </div>
+      )}
+
+      {phase === 'results' && quizResult && (
+        <QuizResults
+          result={quizResult}
+          onRestart={handleRestart}
+          onBackToMenu={handleBackToMenu}
+        />
+      )}
+
+      {/* Modal de confirmação para finalizar quiz */}
+      {showConfirmFinish && (
+        <ConfirmFinish
+          totalQuestions={quizState.questions.length}
+          answeredQuestions={Object.keys(quizState.userAnswers).length}
+          onConfirm={handleConfirmFinish}
+          onCancel={handleCancelFinish}
+        />
+      )}
     </div>
   );
 }
