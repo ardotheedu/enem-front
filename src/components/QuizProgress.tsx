@@ -68,4 +68,4 @@ export default function QuizProgress({
   );
 }
 
-export default QuizProgress;
+

@@ -18,4 +18,4 @@ export default function Loading({ message = "Carregando..." }: LoadingProps) {
   );
 }
 
-export default Loading;
+

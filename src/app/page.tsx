@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Question, QuizState, QuizResult } from '@/types/quiz';
 import { enemAPI } from '@/services/enemAPI';
+import { imagePreloader } from '@/utils/imagePreloader';
 import DisciplineSelection from '@/components/DisciplineSelection';
 import QuizQuestion from '@/components/QuizQuestion';
 import QuizResults from '@/components/QuizResults';
@@ -41,6 +42,9 @@ export default function Home() {
       
       let questions: Question[] = [];
       
+      console.log('🚀 Iniciando carregamento do quiz...');
+      const startTime = Date.now();
+      
       if (selectedDiscipline) {
         // Buscar questões de uma disciplina específica
         questions = await enemAPI.getQuestionsByDiscipline(selectedDiscipline, 45);
@@ -55,6 +59,30 @@ export default function Home() {
 
       // Embaralhar as questões
       const shuffledQuestions = questions.sort(() => Math.random() - 0.5);
+      
+      // Pré-carregar imagens das primeiras 10 questões para melhor UX
+      const imagesToPreload: string[] = [];
+      shuffledQuestions.slice(0, 10).forEach(question => {
+        if (question.context) {
+          imagesToPreload.push(...imagePreloader.extractImageUrls(question.context));
+        }
+        if (question.files) {
+          imagesToPreload.push(...question.files);
+        }
+        if (question.images) {
+          imagesToPreload.push(...question.images.context, ...question.images.files, ...question.images.alternatives);
+        }
+      });
+      
+      // Pré-carregar imagens em background (não bloquear UI)
+      if (imagesToPreload.length > 0) {
+        imagePreloader.preloadImages(imagesToPreload).catch(err => {
+          console.warn('Alguns problemas no pré-carregamento de imagens:', err);
+        });
+      }
+
+      const loadTime = Date.now() - startTime;
+      console.log(`✅ Quiz carregado em ${loadTime}ms`);
 
       setQuizState({
         questions: shuffledQuestions,
@@ -69,9 +97,9 @@ export default function Home() {
       });
 
       setPhase('quiz');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao iniciar quiz:', err);
-      setError('Erro ao carregar questões. Verifique se a API está funcionando.');
+      setError(err.message || 'Erro ao carregar questões. Verifique se a API está funcionando.');
       setPhase('selection');
     }
   };
@@ -91,14 +119,45 @@ export default function Home() {
       ...prev,
       currentQuestionIndex: index
     }));
+    
+    // Pré-carregar imagens das próximas 3 questões
+    preloadUpcomingImages(index);
+  };
+
+  // Função para pré-carregar imagens das próximas questões
+  const preloadUpcomingImages = (currentIndex: number) => {
+    const nextQuestions = quizState.questions.slice(currentIndex + 1, currentIndex + 4);
+    const imagesToPreload: string[] = [];
+    
+    nextQuestions.forEach(question => {
+      if (question.context) {
+        imagesToPreload.push(...imagePreloader.extractImageUrls(question.context));
+      }
+      if (question.files) {
+        imagesToPreload.push(...question.files);
+      }
+      if (question.images) {
+        imagesToPreload.push(...question.images.context, ...question.images.files, ...question.images.alternatives);
+      }
+    });
+    
+    if (imagesToPreload.length > 0) {
+      imagePreloader.preloadImages(imagesToPreload).catch(() => {
+        // Silenciosamente falhar - não é crítico
+      });
+    }
   };
 
   const handleNext = () => {
     if (quizState.currentQuestionIndex < quizState.questions.length - 1) {
+      const nextIndex = quizState.currentQuestionIndex + 1;
       setQuizState(prev => ({
         ...prev,
-        currentQuestionIndex: prev.currentQuestionIndex + 1
+        currentQuestionIndex: nextIndex
       }));
+      
+      // Pré-carregar imagens das próximas questões
+      preloadUpcomingImages(nextIndex);
     } else {
       // Mostrar modal de confirmação antes de finalizar
       setShowConfirmFinish(true);
@@ -194,6 +253,9 @@ export default function Home() {
     });
     setQuizResult(null);
     setError(null);
+    
+    // Limpar cache de imagens para liberar memória
+    imagePreloader.clearCache();
   };
 
   if (error) {

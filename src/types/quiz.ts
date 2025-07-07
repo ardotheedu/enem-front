@@ -5,6 +5,12 @@ export interface Alternative {
   isCorrect: boolean;
 }
 
+export interface QuestionImages {
+  context: string[];
+  files: string[];
+  alternatives: string[];
+}
+
 export interface Question {
   id: number;
   title: string;
@@ -23,6 +29,7 @@ export interface Question {
   };
   alternatives: Alternative[];
   files: string[];
+  images?: QuestionImages;
 }
 
 export interface Discipline {
